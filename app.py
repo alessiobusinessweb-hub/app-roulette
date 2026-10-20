@@ -1,3 +1,5 @@
+from datetime import datetime
+import hashlib
 from bs4 import BeautifulSoup
 import pandas as pd
 import streamlit as st
@@ -7,8 +9,53 @@ st.set_page_config(
     page_title="Roulette Analytics Pro", page_icon="🎯", layout="centered"
 )
 
+# CHIAVE SEGRETA AMMINISTRATORE (Deve essere uguale a quella del tuo generatore!)
+SECRET_KEY = "MIA_CHIAVE_SUPER_SEGRETA_ROULETTE"
+
+
 # ==========================================
-# 1. PARSER HTML PER ESTRAZIONE NUMERI REALI
+# VERIFICA LICENZA A SCADENZA
+# ==========================================
+def verifica_licenza(codice_licenza):
+  try:
+    parti = codice_licenza.strip().split("-")
+    if len(parti) != 3:
+      return False, "Formato codice non valido.", None
+
+    nome_utente, data_str, firma_ricevuta = parti
+    payload = f"{nome_utente.upper()}-{data_str}"
+
+    # Verifichiamo l'autenticità della firma
+    firma_calcolata = hashlib.sha256(
+        f"{payload}{SECRET_KEY}".encode()
+    ).hexdigest()[:8]
+    if firma_ricevuta.lower() != firma_calcolata.lower():
+      return False, "Codice di licenza contraffatto o errato.", None
+
+    # Verifichiamo la data di scadenza
+    data_scadenza = datetime.strptime(data_str, "%Y%m%d")
+    data_oggi = datetime.now()
+
+    if data_oggi > data_scadenza:
+      return (
+          False,
+          f"Licenza per {nome_utente} SCADUTA il"
+          f" {data_scadenza.strftime('%d/%m/%Y')}!",
+          data_scadenza,
+      )
+
+    return (
+        True,
+        f"Licenza per {nome_utente} ATTIVA fino al"
+        f" {data_scadenza.strftime('%d/%m/%Y')}",
+        data_scadenza,
+    )
+  except Exception:
+    return False, "Errore durante la verifica del codice.", None
+
+
+# ==========================================
+# PARSER HTML
 # ==========================================
 def estrai_numeri_da_html(contenuto_html):
   soup = BeautifulSoup(contenuto_html, "html.parser")
@@ -33,7 +80,7 @@ def estrai_numeri_da_html(contenuto_html):
 
 
 # ==========================================
-# 2. STATO DELLA SESSIONE (MEMORIA APP)
+# STATO DELLA SESSIONE (MEMORIA APP)
 # ==========================================
 VALORE_UNITA_BASE = 0.10
 MAX_COLPI_CICLO = 5
@@ -64,22 +111,28 @@ if "autenticato" not in st.session_state:
 
 
 # ==========================================
-# 3. SISTEMA PASSWORD / ABBONAMENTO SEMPLICE
+# LOGIN CON LICENZA A SCADENZA
 # ==========================================
-st.sidebar.title("🔐 Accesso Riservato")
-password_input = st.sidebar.text_input("Inserisci Password Licenza:", type="password")
+st.sidebar.title("🔑 Attivazione Licenza")
+licenza_input = st.sidebar.text_input(
+    "Inserisci Codice Licenza:", type="password"
+)
 
-# Sostituisci "MIA_PASSWORD_SECRET" con la tua password preferita per gli amici!
-if password_input == "MIA_PASSWORD_SECRET":
-  st.session_state.autenticato = True
-  st.sidebar.success("✅ Licenza Attiva")
+if licenza_input:
+  valido, messaggio, scadenza = verifica_licenza(licenza_input)
+  if valido:
+    st.session_state.autenticato = True
+    st.sidebar.success(messaggio)
+  else:
+    st.session_state.autenticato = False
+    st.sidebar.error(messaggio)
 else:
   st.session_state.autenticato = False
-  st.sidebar.warning("🔒 Inserisci una password valida per accedere")
+  st.sidebar.info("👋 Inserisci la tua licenza personale per accedere.")
 
 
 # ==========================================
-# 4. LOGICA DI CALCOLO E STAKING
+# LOGICA DI CALCOLO E STAKING
 # ==========================================
 def calcola_pezzi_aggressivi(bankroll_attuale, bankroll_iniziale):
   profitto = bankroll_attuale - bankroll_iniziale
@@ -188,17 +241,16 @@ def elabora_tiro(nuovo_numero):
 
 
 # ==========================================
-# 5. INTERFACCIA UTENTE PRINCIPALE
+# DASHBOARD UTENTE
 # ==========================================
 st.title("🎯 Roulette Analytics Pro")
 
 if not st.session_state.autenticato:
-  st.info(
-      "👋 Benvenuto! Inserisci la tua **Password di Licenza** nella barra"
-      " laterale per accedere."
+  st.warning(
+      "🔒 Accesso bloccato. Inserisci un **codice licenza valido e in corso di"
+      " validità** per sbloccare l'applicazione."
   )
 else:
-  # Sezione Caricamento HTML & Saldo
   with st.expander("⚙️ Setup Iniziale e Caricamento Dati", expanded=False):
     saldo_in = st.number_input(
         "Saldo Iniziale (€):",
@@ -224,7 +276,6 @@ else:
       )
       st.rerun()
 
-  # Pannello Metriche Cassa
   col1, col2, col3 = st.columns(3)
   col1.metric("💰 Cassa Attuale", f"{st.session_state.bankroll:.2f} €")
   pnl = st.session_state.bankroll - st.session_state.bankroll_iniziale
@@ -235,7 +286,6 @@ else:
   )
   col3.metric("📈 Picco Massimo", f"{st.session_state.peak_bankroll:.2f} €")
 
-  # Terna Consigliata
   if st.session_state.ciclo_attivo:
     t = st.session_state.terna_corrente
     st.markdown(
@@ -253,7 +303,6 @@ else:
         " numero"
     )
 
-  # Cronologia e Controlli Annulla
   col_undo, col_reset = st.columns([2, 1])
   if col_undo.button("↩️ Annulla Ultimo Tiro (Undo)"):
     annulla_ultimo_tiro()
@@ -274,8 +323,6 @@ else:
   st.divider()
   st.subheader("🎲 Tappeto Roulette (Clicca per inserire il numero)")
 
-  # Griglia Tappeto Cliccabile
-  # Zero
   if st.button("0", key="num_0", use_container_width=True):
     elabora_tiro(0)
     st.rerun()
