@@ -11,7 +11,7 @@ st.set_page_config(
 
 # CHIAVI DI SICUREZZA
 SECRET_KEY = "MIA_CHIAVE_SUPER_SEGRETA_ROULETTE"
-PIN_ADMIN = "1234"
+PIN_ADMIN = "Tavolo.00"
 
 
 # ==========================================
