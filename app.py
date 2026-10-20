@@ -1,20 +1,21 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 from bs4 import BeautifulSoup
 import pandas as pd
 import streamlit as st
 
-# Configurazione Pagina Streamlit per Smartphone/PC
+# Configurazione Pagina Streamlit
 st.set_page_config(
     page_title="Roulette Analytics Pro", page_icon="🎯", layout="centered"
 )
 
-# CHIAVE SEGRETA AMMINISTRATORE (Deve essere uguale a quella del tuo generatore!)
+# CHIAVI DI SICUREZZA
 SECRET_KEY = "MIA_CHIAVE_SUPER_SEGRETA_ROULETTE"
+PIN_ADMIN = "1234"
 
 
 # ==========================================
-# VERIFICA LICENZA A SCADENZA
+# VERIFICA LICENZA ROBUSTA
 # ==========================================
 def verifica_licenza(codice_licenza):
   try:
@@ -25,33 +26,38 @@ def verifica_licenza(codice_licenza):
     nome_utente, data_str, firma_ricevuta = parti
     payload = f"{nome_utente.upper()}-{data_str}"
 
-    # Verifichiamo l'autenticità della firma
     firma_calcolata = hashlib.sha256(
         f"{payload}{SECRET_KEY}".encode()
     ).hexdigest()[:8]
     if firma_ricevuta.lower() != firma_calcolata.lower():
-      return False, "Codice di licenza contraffatto o errato.", None
+      return False, "Codice di licenza errato o contraffatto.", None
 
-    # Verifichiamo la data di scadenza
-    data_scadenza = datetime.strptime(data_str, "%Y%m%d")
+    # Gestione flessibile della data (8 o 12 cifre)
+    if len(data_str) == 12:
+      data_scadenza = datetime.strptime(data_str, "%Y%m%d%H%M")
+    elif len(data_str) == 8:
+      data_scadenza = datetime.strptime(data_str, "%Y%m%d")
+    else:
+      return False, "Formato data non valido nel codice.", None
+
     data_oggi = datetime.now()
 
     if data_oggi > data_scadenza:
       return (
           False,
           f"Licenza per {nome_utente} SCADUTA il"
-          f" {data_scadenza.strftime('%d/%m/%Y')}!",
+          f" {data_scadenza.strftime('%d/%m/%Y alle %H:%M') if len(data_str)==12 else data_scadenza.strftime('%d/%m/%Y')}!",
           data_scadenza,
       )
 
     return (
         True,
         f"Licenza per {nome_utente} ATTIVA fino al"
-        f" {data_scadenza.strftime('%d/%m/%Y')}",
+        f" {data_scadenza.strftime('%d/%m/%Y alle %H:%M') if len(data_str)==12 else data_scadenza.strftime('%d/%m/%Y')}",
         data_scadenza,
     )
-  except Exception:
-    return False, "Errore durante la verifica del codice.", None
+  except Exception as e:
+    return False, f"Errore di verifica: {str(e)}", None
 
 
 # ==========================================
@@ -80,11 +86,10 @@ def estrai_numeri_da_html(contenuto_html):
 
 
 # ==========================================
-# STATO DELLA SESSIONE (MEMORIA APP)
+# STATO DELLA SESSIONE
 # ==========================================
 VALORE_UNITA_BASE = 0.10
 MAX_COLPI_CICLO = 5
-ROSSI = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 
 if "bankroll_iniziale" not in st.session_state:
   st.session_state.bankroll_iniziale = 50.0
@@ -111,9 +116,9 @@ if "autenticato" not in st.session_state:
 
 
 # ==========================================
-# LOGIN CON LICENZA A SCADENZA
+# SIDEBAR: LOGIN & ADMIN
 # ==========================================
-st.sidebar.title("🔑 Attivazione Licenza")
+st.sidebar.title("🔑 Licenza Utente")
 licenza_input = st.sidebar.text_input(
     "Inserisci Codice Licenza:", type="password"
 )
@@ -129,6 +134,34 @@ if licenza_input:
 else:
   st.session_state.autenticato = False
   st.sidebar.info("👋 Inserisci la tua licenza personale per accedere.")
+
+st.sidebar.divider()
+
+with st.sidebar.expander("⚙️ Area Amministratore", expanded=False):
+  pin_inserted = st.text_input("PIN Admin:", type="password")
+  if pin_inserted == PIN_ADMIN:
+    st.success("Accreditato come Admin")
+    nome_nuovo = st.text_input("Nome Utente:", value="CLIENTE")
+
+    col_m, col_g, col_h = st.columns(3)
+    mesi = col_m.selectbox("Mesi:", options=[0, 1, 2, 3, 6, 12], index=1)
+    giorni = col_g.selectbox("Giorni:", options=list(range(0, 31)), index=0)
+    ore = col_h.selectbox("Ore:", options=list(range(0, 24)), index=0)
+
+    if st.button("⚡ Genera Licenza"):
+      adesso = datetime.now()
+      scadenza_dt = adesso + timedelta(
+          days=giorni + (mesi * 30), hours=ore
+      )
+      data_str = scadenza_dt.strftime("%Y%m%d%H%M")
+      payload = f"{nome_nuovo.upper().strip()}-{data_str}"
+      firma = hashlib.sha256(f"{payload}{SECRET_KEY}".encode()).hexdigest()[:8]
+      codice_generato = f"{payload}-{firma}"
+
+      st.code(codice_generato, language="text")
+      st.caption(
+          f"Valida fino al: {scadenza_dt.strftime('%d/%m/%Y alle %H:%M')}"
+      )
 
 
 # ==========================================
@@ -233,7 +266,7 @@ def elabora_tiro(nuovo_numero):
 
     top3.sort()
     st.session_state.terna_corrente = top3
-    st.session_state.ciclo_attivo = True
+    st.session_state.cicio_attivo = True
     st.session_state.colpo_attuale_ciclo = 0
 
   if st.session_state.bankroll > st.session_state.peak_bankroll:
